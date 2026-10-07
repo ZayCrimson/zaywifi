@@ -1,0 +1,15 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:background="#07101c" android:fillViewport="true" android:layout_width="match_parent" android:layout_height="match_parent">
+<LinearLayout android:padding="18dp" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+<TextView android:text="ZAY WiFi" android:textColor="#ffffff" android:textSize="30sp" android:textStyle="bold" android:layout_marginBottom="4dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+<TextView android:text="Hotspot Voucher" android:textColor="#8d96a8" android:textSize="14sp" android:layout_marginBottom="18dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+<LinearLayout android:background="#102438" android:padding="16dp" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+<TextView android:id="@+id/status" android:text="● Hotspot belum aktif" android:textColor="#ff7181" android:textSize="17sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:id="@+id/gateway" android:text="Gateway: -" android:textColor="#9aa7b8" android:layout_marginTop="8dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+</LinearLayout>
+<Button android:id="@+id/start" android:text="▶  MULAI VOUCHER" android:layout_marginTop="14dp" android:layout_width="match_parent" android:layout_height="52dp"/>
+<Button android:id="@+id/stop" android:text="■  STOP / BERSIHKAN" android:layout_width="match_parent" android:layout_height="52dp"/>
+<Button android:id="@+id/create" android:text="＋  BUAT VOUCHER" android:layout_width="match_parent" android:layout_height="52dp"/>
+<Button android:id="@+id/list" android:text="▣  DAFTAR VOUCHER" android:layout_width="match_parent" android:layout_height="52dp"/>
+<Button android:id="@+id/clients" android:text="♙  CLIENT AKTIF" android:layout_width="match_parent" android:layout_height="52dp"/>
+<TextView android:id="@+id/log" android:textColor="#8d96a8" android:textSize="12sp" android:padding="10dp" android:layout_marginTop="12dp" android:background="#0d1826" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+</LinearLayout></ScrollView>

@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    >
+
+    <meta name="theme-color" content="#080b12">
+    <meta name="color-scheme" content="dark">
+
+    <title>ZAY WiFi</title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #080b12;
+            --panel: rgba(18, 22, 32, .90);
+            --line: rgba(255,255,255,.085);
+            --text: #f5f7fb;
+            --muted: #8d96a8;
+            --accent: #7c5cff;
+            --accent2: #a855f7;
+            --ok: #38d996;
+            --danger: #ff7181;
+        }
+
+        html,
+        body {
+            min-height: 100%;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            padding: 20px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            overflow-x: hidden;
+
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                Arial,
+                sans-serif;
+
+            color: var(--text);
+
+            background:
+                radial-gradient(
+                    500px 320px at 8% -5%,
+                    rgba(124,92,255,.23),
+                    transparent 65%
+                ),
+                radial-gradient(
+                    480px 300px at 100% 105%,
+                    rgba(168,85,247,.16),
+                    transparent 65%
+                ),
+                var(--bg);
+        }
+
+        body::before {
+            content: "";
+
+            position: fixed;
+            inset: 0;
+
+            pointer-events: none;
+
+            background:
+                linear-gradient(
+                    120deg,
+                    transparent 25%,
+                    rgba(255,255,255,.018) 50%,
+                    transparent 75%
+                );
+        }
+
+        .wrap {
+            width: 100%;
+            max-width: 390px;
+        }
+
+        .card {
+            position: relative;
+            overflow: hidden;
+
+            padding: 25px 22px 20px;
+
+            border: 1px solid var(--line);
+            border-radius: 27px;
+
+            background: var(--panel);
+
+            box-shadow:
+                0 28px 90px rgba(0,0,0,.48),
+                inset 0 1px 0 rgba(255,255,255,.035);
+
+            backdrop-filter: blur(22px);
+            -webkit-backdrop-filter: blur(22px);
+        }
+
+        /* TOP LINE */
+
+        .topline {
+            width: 58px;
+            height: 4px;
+
+            margin: 0 auto 24px;
+
+            border-radius: 99px;
+
+            background:
+                linear-gradient(
+                    90deg,
+                    var(--accent),
+                    var(--accent2)
+                );
+
+            box-shadow:
+                0 5px 20px rgba(124,92,255,.45);
+        }
+
+        /* BRAND */
+
+        .brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+
+            margin-bottom: 27px;
+        }
+
+        .brand-main {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .brand-name {
+            font-size: 32px;
+            line-height: 1;
+
+            font-weight: 900;
+            letter-spacing: -.8px;
+
+            background:
+                linear-gradient(
+                    90deg,
+                    #7c5cff,
+                    #a855f7
+                );
+
+            -webkit-background-clip: text;
+            background-clip: text;
+
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+        }
+
+        .brand-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            gap: 6px;
+
+            margin-top: 9px;
+
+            color: var(--muted);
+
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        .dot {
+            width: 6px;
+            height: 6px;
+
+            border-radius: 50%;
+
+            background: var(--ok);
+
+            box-shadow:
+                0 0 10px rgba(56,217,150,.75);
+        }
+
+        /* TITLE */
+
+        h1 {
+            margin: 0;
+
+            text-align: center;
+
+            font-size: 29px;
+            line-height: 1.12;
+
+            letter-spacing: -.9px;
+        }
+
+        .subtitle {
+            margin: 10px 0 0;
+
+            color: var(--muted);
+
+            text-align: center;
+
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        /* PLATFORM */
+
+        .platform {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            width: fit-content;
+
+            margin: 17px auto 0;
+
+            padding: 7px 10px;
+
+            border: 1px solid var(--line);
+            border-radius: 999px;
+
+            color: #b9c1d1;
+
+            background: rgba(255,255,255,.025);
+
+            font-size: 11px;
+        }
+
+        .platform-dot {
+            width: 5px;
+            height: 5px;
+
+            margin-right: 7px;
+
+            border-radius: 50%;
+
+            background: #8d78ff;
+        }
+
+        /* FORM */
+
+        .form {
+            margin-top: 23px;
+        }
+
+        label {
+            display: block;
+
+            width: 100%;
+
+            margin: 0 0 10px;
+
+            color: #dce1eb;
+
+            font-size: 13px;
+            font-weight: 700;
+
+            text-align: center;
+        }
+
+        .input-wrap {
+            position: relative;
+        }
+
+        .input {
+            width: 100%;
+            height: 57px;
+
+            padding: 0 48px 0 16px;
+
+            border: 1px solid rgba(255,255,255,.105);
+            border-radius: 16px;
+
+            outline: none;
+
+            background: rgba(255,255,255,.045);
+
+            color: var(--text);
+
+            font-size: 17px;
+            font-weight: 800;
+
+            letter-spacing: 1.7px;
+
+            text-align: center;
+            text-transform: uppercase;
+
+            transition: .18s ease;
+        }
+
+        .input::placeholder {
+            color: #626c7d;
+
+            font-size: 13px;
+            font-weight: 600;
+
+            letter-spacing: .5px;
+        }
+
+        .input:focus {
+            border-color: rgba(124,92,255,.75);
+
+            background: rgba(124,92,255,.055);
+
+            box-shadow:
+                0 0 0 4px rgba(124,92,255,.10);
+        }
+
+        .key-icon {
+            position: absolute;
+
+            right: 16px;
+            top: 50%;
+
+            transform: translateY(-50%);
+
+            color: #697387;
+
+            pointer-events: none;
+        }
+
+        /* BUTTON */
+
+        .btn {
+            width: 100%;
+            height: 56px;
+
+            margin-top: 11px;
+
+            border: 0;
+            border-radius: 16px;
+
+            color: #fff;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    var(--accent),
+                    var(--accent2)
+                );
+
+            font-size: 15px;
+            font-weight: 800;
+
+            letter-spacing: .1px;
+
+            cursor: pointer;
+
+            box-shadow:
+                0 14px 30px rgba(124,92,255,.24);
+
+            transition:
+                transform .15s ease,
+                opacity .15s ease,
+                filter .15s ease;
+        }
+
+        .btn:active {
+            transform: scale(.985);
+        }
+
+        .btn:disabled {
+            opacity: .55;
+            cursor: wait;
+        }
+
+        /* HINT */
+
+        .hint {
+            margin: 11px 0 0;
+
+            color: #667083;
+
+            text-align: center;
+
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        /* STATUS */
+
+        .status {
+            min-height: 21px;
+
+            margin-top: 12px;
+
+            text-align: center;
+
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .status.error {
+            color: var(--danger);
+        }
+
+        .status.ok {
+            color: #72e8ae;
+        }
+
+        /* SUCCESS */
+
+        .success {
+            margin-top: 23px;
+
+            padding: 18px 15px;
+
+            border: 1px solid rgba(56,217,150,.17);
+            border-radius: 17px;
+
+            background: rgba(56,217,150,.055);
+
+            color: #a4efc5;
+
+            text-align: center;
+
+            line-height: 1.55;
+
+            font-size: 13px;
+        }
+
+        .success-icon {
+            width: 45px;
+            height: 45px;
+
+            margin: 0 auto 10px;
+
+            display: grid;
+            place-items: center;
+
+            border-radius: 50%;
+
+            background: rgba(56,217,150,.10);
+
+            color: var(--ok);
+
+            font-size: 21px;
+        }
+
+        /* FOOTER */
+
+        .footer {
+            margin-top: 20px;
+
+            color: #555f70;
+
+            text-align: center;
+
+            font-size: 10px;
+
+            letter-spacing: .25px;
+        }
+
+        /* SMALL SCREEN */
+
+        @media (max-height: 650px) {
+
+            body {
+                padding: 12px;
+            }
+
+            .card {
+                padding-top: 19px;
+                padding-bottom: 16px;
+            }
+
+            .topline {
+                margin-bottom: 17px;
+            }
+
+            .brand {
+                margin-bottom: 19px;
+            }
+
+            .form {
+                margin-top: 18px;
+            }
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+<div class="wrap">
+
+    <main class="card">
+
+        <div class="topline"></div>
+
+
+        <!-- BRAND -->
+
+        <div class="brand">
+
+            <div class="brand-main">
+
+                <div class="brand-name">
+                    ZAY WiFi
+                </div>
+
+            </div>
+
+            <div class="brand-status">
+
+                <span class="dot"></span>
+
+                Jaringan tersedia
+
+            </div>
+
+        </div>
+
+
+        <!-- TITLE -->
+
+        <h1>
+            Masuk ke Wi-Fi
+        </h1>
+
+
+        <p class="subtitle">
+            Gunakan kode voucher untuk mendapatkan akses internet.
+        </p>
+
+
+        <!-- PLATFORM -->
+
+        <div class="platform">
+
+            <span class="platform-dot"></span>
+
+            Android
+
+            terdeteksi
+
+        </div>
+
+
+        <div id="alreadyAuthorized" style="display:none">
+
+
+            <div class="success">
+
+                <div class="success-icon">
+                    ✓
+                </div>
+
+                <strong>
+                    Akses sudah aktif
+                </strong>
+
+                <br>
+
+                Perangkat ini sudah terhubung ke internet.
+
+            </div>
+
+
+        </div><div id="loginBlock">
+
+
+            <form
+                class="form"
+                id="voucherForm"
+            >
+
+                <label for="voucher">
+                    Masukkan kode di bawah ini
+                </label>
+
+
+                <div class="input-wrap">
+
+                    <input
+                        class="input"
+                        id="voucher"
+                        name="voucher"
+                        type="text"
+                        maxlength="32"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        spellcheck="false"
+                        placeholder="Masukkan kode voucher"
+                        required
+                    >
+
+                    <span
+                        class="key-icon"
+                        aria-hidden="true"
+                    >
+                        ⌕
+                    </span>
+
+                </div>
+
+
+                <button
+                    class="btn"
+                    id="connectBtn"
+                    type="submit"
+                >
+                    Hubungkan ke Internet
+                </button>
+
+
+                <p class="hint">
+                    Kode voucher hanya dapat digunakan oleh satu perangkat.
+                </p>
+
+
+                <div
+                    id="status"
+                    class="status"
+                    role="status"
+                    aria-live="polite"
+                ></div>
+
+            </form>
+
+
+        </div>
+
+
+        <div class="footer">
+            ZAY WiFi · Akses internet pribadi
+        </div>
+
+    </main>
+
+</div>
+
+
+<script>
+
+(function () {
+
+    fetch('/status', {cache:'no-store'}).then(function(r){return r.json();}).then(function(s){
+        var a=document.getElementById('alreadyAuthorized');
+        var l=document.getElementById('loginBlock');
+        if(a && l && s.authorized){ a.style.display='block'; l.style.display='none'; }
+    }).catch(function(){});
+
+    const platform =
+        "android";
+
+    const checkUrls =
+        ["/probe/generate_204"];
+
+    const form =
+        document.getElementById('voucherForm');
+
+    const input =
+        document.getElementById('voucher');
+
+    const btn =
+        document.getElementById('connectBtn');
+
+    const status =
+        document.getElementById('status');
+
+
+    if (
+        !form ||
+        !input ||
+        !btn ||
+        !status
+    ) {
+        return;
+    }
+
+
+    function setStatus(text, type) {
+
+        status.textContent = text;
+
+        status.className =
+            'status' +
+            (type ? ' ' + type : '');
+
+    }
+
+
+    function probeAuthorized(url) {
+
+        return fetch(url, {
+
+            method: 'GET',
+
+            cache: 'no-store',
+
+            credentials: 'same-origin'
+
+        })
+
+        .then(function (response) {
+
+            if (
+                url.indexOf('generate_204') !== -1
+            ) {
+                return response.status === 204;
+            }
+
+            return response.ok;
+
+        })
+
+        .catch(function () {
+
+            return false;
+
+        });
+
+    }
+
+
+    function runPlatformChecks() {
+
+        return Promise.all(
+            checkUrls.map(probeAuthorized)
+        )
+
+        .then(function (results) {
+
+            return results.some(Boolean);
+
+        });
+
+    }
+
+
+    function closeCaptivePortal() {
+
+        if (
+            platform === 'ios' ||
+            platform === 'macos'
+        ) {
+
+            window.location.replace(
+                '/probe/hotspot-detect.html'
+            );
+
+            return;
+
+        }
+
+
+        if (platform === 'windows') {
+
+            window.location.replace(
+                '/probe/connecttest.txt'
+            );
+
+            return;
+
+        }
+
+
+        window.location.replace(
+            '/probe/generate_204'
+        );
+
+    }
+
+
+    input.addEventListener(
+        'input',
+        function () {
+
+            input.value =
+                input.value
+                    .toUpperCase()
+                    .replace(/[^A-Z0-9-]/g, '');
+
+        }
+    );
+
+
+    form.addEventListener(
+        'submit',
+        function (event) {
+
+            event.preventDefault();
+
+
+            const voucher =
+                input.value.trim();
+
+
+            if (!voucher) {
+
+                setStatus(
+                    'Masukkan kode voucher terlebih dahulu.',
+                    'error'
+                );
+
+                input.focus();
+
+                return;
+
+            }
+
+
+            btn.disabled = true;
+            input.disabled = true;
+
+
+            setStatus(
+                'Memeriksa voucher...',
+                ''
+            );
+
+
+            const body =
+                new URLSearchParams();
+
+
+            body.set(
+                'voucher',
+                voucher
+            );
+
+
+            fetch('/authorize', {
+
+                method: 'POST',
+
+                headers: {
+
+                    'Accept':
+                        'application/json',
+
+                    'Content-Type':
+                        'application/x-www-form-urlencoded;charset=UTF-8'
+
+                },
+
+                body:
+                    body.toString(),
+
+                cache:
+                    'no-store',
+
+                credentials:
+                    'same-origin'
+
+            })
+
+            .then(function (response) {
+
+                return response.json()
+
+                    .then(function (data) {
+
+                        if (
+                            !response.ok ||
+                            !data.ok
+                        ) {
+
+                            throw new Error(
+                                data.message ||
+                                'Voucher tidak valid.'
+                            );
+
+                        }
+
+                        return data;
+
+                    });
+
+            })
+
+
+            .then(function (data) {
+
+                setStatus(
+                    data.message ||
+                    'Voucher valid. Memverifikasi koneksi...',
+                    'ok'
+                );
+
+                return runPlatformChecks();
+
+            })
+
+
+            .then(function (ok) {
+
+                if (!ok) {
+
+                    throw new Error(
+                        'Akses sudah diberikan, tetapi pengecekan jaringan belum selesai.'
+                    );
+
+                }
+
+
+                setStatus(
+                    'Berhasil terhubung. Membuka internet...',
+                    'ok'
+                );
+
+
+                setTimeout(
+                    closeCaptivePortal,
+                    350
+                );
+
+            })
+
+
+            .catch(function (error) {
+
+                setStatus(
+                    error.message ||
+                    'Gagal terhubung. Coba lagi.',
+                    'error'
+                );
+
+
+                btn.disabled = false;
+                input.disabled = false;
+
+                input.focus();
+
+            });
+
+        }
+    );
+
+})();
+
+</script>
+
+</body>
+</html>
