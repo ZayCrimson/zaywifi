@@ -188,7 +188,7 @@ public class MainActivity extends Activity {
             if (!gw.isEmpty()) {
                 Root.Result r = Firewall.setup(gw, portal.port());
 
-                if (r == null || !r.success) {
+                if (r == null || !r.ok) {
                     runOnUiThread(() -> status.setText(
                         "Status: server aktif, firewall gagal"
                     ));
@@ -241,15 +241,34 @@ public class MainActivity extends Activity {
     private void refreshVouchers() {
         if (log == null) return;
 
-        String data = vouchers.list();
-        if (data == null) data = "";
-        log.setText(data);
+        List<VoucherManager.Voucher> list = vouchers.list();
+        StringBuilder data = new StringBuilder();
+        for (VoucherManager.Voucher v : list) {
+            data.append(v.code);
+            if (v.ip == null || v.ip.isEmpty()) {
+                data.append("  Belum Dipakai");
+            } else {
+                data.append("  Dipakai - ").append(v.ip);
+            }
+            data.append("\n");
+        }
+        log.setText(data.toString());
     }
 
     private void showVouchers() {
-        final String data = vouchers.list();
+        List<VoucherManager.Voucher> list = vouchers.list();
+        StringBuilder data = new StringBuilder();
+        for (VoucherManager.Voucher v : list) {
+            data.append(v.code);
+            if (v.ip == null || v.ip.isEmpty()) {
+                data.append("  Belum Dipakai");
+            } else {
+                data.append("  Dipakai - ").append(v.ip);
+            }
+            data.append("\n");
+        }
 
-        TextView view = text(data == null ? "" : data, 15);
+        TextView view = text(data.toString(), 15);
 
         new AlertDialog.Builder(this)
             .setTitle("Daftar Voucher")
