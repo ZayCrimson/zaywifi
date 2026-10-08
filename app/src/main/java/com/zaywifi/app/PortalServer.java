@@ -15,14 +15,12 @@ public final class PortalServer {
     private final File dataDir;
 
     private volatile boolean running;
+    private volatile String lastError = "";
+
     private ServerSocket server;
     private ExecutorService pool;
 
     private final int port = 8080;
-
-    // Menyimpan error terakhir supaya MainActivity bisa menampilkan
-    // penyebab sebenarnya kalau server gagal start.
-    private volatile String lastError = "";
 
     public PortalServer(Context c, VoucherManager v) {
         ctx = c;
@@ -39,7 +37,12 @@ public final class PortalServer {
         return lastError;
     }
 
+    /*
+     * Server lokal.
+     * Tidak bergantung pada hotspot/gateway.
+     */
     public synchronized boolean start() {
+
         if (running) {
             return true;
         }
@@ -47,10 +50,20 @@ public final class PortalServer {
         lastError = "";
 
         try {
-            server = new ServerSocket(
-                    port,
-                    32,
-                    InetAddress.getByName("0.0.0.0")
+            /*
+             * Bind hanya ke loopback.
+             * Ini dipakai untuk memastikan server lokal Android
+             * bisa hidup tanpa hotspot.
+             */
+            server = new ServerSocket();
+            server.setReuseAddress(true);
+
+            server.bind(
+                    new InetSocketAddress(
+                            InetAddress.getByName("127.0.0.1"),
+                            port
+                    ),
+                    32
             );
 
             pool = Executors.newCachedThreadPool();
@@ -73,7 +86,6 @@ public final class PortalServer {
                         } catch (IOException e) {
                             if (running) {
                                 lastError = e.toString();
-                                e.printStackTrace();
                             }
                         }
                     }
@@ -82,9 +94,10 @@ public final class PortalServer {
 
             return true;
 
-        } catch (IOException e) {
+        } catch (Exception e) {
+
             lastError = e.toString();
-            e.printStackTrace();
+            running = false;
 
             try {
                 if (server != null) {
@@ -93,13 +106,11 @@ public final class PortalServer {
             } catch (Exception ignored) {
             }
 
-            server = null;
-            running = false;
-
             if (pool != null) {
                 pool.shutdownNow();
             }
 
+            server = null;
             pool = null;
 
             return false;
@@ -107,6 +118,7 @@ public final class PortalServer {
     }
 
     public synchronized void stop() {
+
         running = false;
 
         try {
@@ -116,12 +128,11 @@ public final class PortalServer {
         } catch (Exception ignored) {
         }
 
-        server = null;
-
         if (pool != null) {
             pool.shutdownNow();
         }
 
+        server = null;
         pool = null;
     }
 
@@ -130,12 +141,15 @@ public final class PortalServer {
     }
 
     private void handle(Socket s) {
+
         try {
+
             s.setSoTimeout(8000);
 
+            InputStream input = s.getInputStream();
             BufferedReader r = new BufferedReader(
                     new InputStreamReader(
-                            s.getInputStream(),
+                            input,
                             StandardCharsets.UTF_8
                     )
             );
@@ -149,22 +163,27 @@ public final class PortalServer {
 
             String[] f = first.split(" ");
 
-            String method = f.length > 0 ? f[0] : "GET";
-            String target = f.length > 1 ? f[1] : "/";
+            String method =
+                    f.length > 0 ? f[0] : "GET";
+
+            String target =
+                    f.length > 1 ? f[1] : "/";
 
             int len = 0;
 
             String line;
 
             while ((line = r.readLine()) != null && !line.isEmpty()) {
+
                 String lower = line.toLowerCase(Locale.US);
 
                 if (lower.startsWith("content-length:")) {
+
                     try {
                         len = Integer.parseInt(
                                 line.substring(15).trim()
                         );
-                    } catch (NumberFormatException ignored) {
+                    } catch (Exception ignored) {
                         len = 0;
                     }
                 }
@@ -173,11 +192,32 @@ public final class PortalServer {
             String body = "";
 
             if (len > 0) {
-                char[] b = new char[len];
-                int n = r.read(b);
 
-                if (n > 0) {
-                    body = new String(b, 0, n);
+                char[] b = new char[len];
+
+                int total = 0;
+
+                while (total < len) {
+
+                    int n = r.read(
+                            b,
+                            total,
+                            len - total
+                    );
+
+                    if (n < 0) {
+                        break;
+                    }
+
+                    total += n;
+                }
+
+                if (total > 0) {
+                    body = new String(
+                            b,
+                            0,
+                            total
+                    );
                 }
             }
 
@@ -192,32 +232,33 @@ public final class PortalServer {
                 path = "/";
             }
 
-            String ip = s.getInetAddress().getHostAddress();
+            String ip =
+                    s.getInetAddress().getHostAddress();
 
-            String out = route(
-                    method,
-                    path,
-                    body,
-                    ip
-            );
+            String out =
+                    route(
+                            method,
+                            path,
+                            body,
+                            ip
+                    );
 
-            byte[] bytes = out.getBytes(
-                    StandardCharsets.UTF_8
-            );
+            byte[] bytes =
+                    out.getBytes(StandardCharsets.UTF_8);
 
-            OutputStream o = s.getOutputStream();
+            OutputStream o =
+                    s.getOutputStream();
 
             o.write(bytes);
             o.flush();
 
             s.close();
 
-        } catch (Exception e) {
-            // Client yang putus sendiri atau request rusak
-            // tidak boleh membuat server mati.
+        } catch (Exception ignored) {
+
             try {
                 s.close();
-            } catch (Exception ignored) {
+            } catch (Exception ignored2) {
             }
         }
     }
@@ -230,6 +271,7 @@ public final class PortalServer {
     ) {
 
         if (path.equals("/status")) {
+
             return json(
                     200,
                     "{\"authorized\":" +
@@ -242,12 +284,17 @@ public final class PortalServer {
                 path.equals("/authorize") &&
                 method.equalsIgnoreCase("POST")
         ) {
-            String v = form(body, "voucher");
+
+            String v = form(
+                    body,
+                    "voucher"
+            );
 
             return authorize(v, ip);
         }
 
         if (path.startsWith("/probe/")) {
+
             String p = path.substring(7);
 
             if (authorized(ip)) {
@@ -261,6 +308,7 @@ public final class PortalServer {
         }
 
         if (path.equals("/success.html")) {
+
             return html(
                     200,
                     load("success.html")
@@ -278,18 +326,21 @@ public final class PortalServer {
             String ip
     ) {
 
-        code = code == null
-                ? ""
-                : code.trim().toUpperCase(Locale.US);
+        code =
+                code == null
+                        ? ""
+                        : code.trim()
+                                .toUpperCase(Locale.US);
 
-        if (!code.matches(
-                "[A-Z0-9][A-Z0-9-]{2,31}"
-        )) {
+        if (
+                !code.matches(
+                        "[A-Z0-9][A-Z0-9-]{2,31}"
+                )
+        ) {
 
             return json(
                     400,
-                    "{\"ok\":false," +
-                            "\"message\":\"Format voucher tidak valid.\"}"
+                    "{\"ok\":false,\"message\":\"Format voucher tidak valid.\"}"
             );
         }
 
@@ -297,18 +348,21 @@ public final class PortalServer {
                 vouchers.find(code);
 
         if (v == null) {
+
             return json(
                     200,
-                    "{\"ok\":false," +
-                            "\"message\":\"Voucher tidak ditemukan.\"}"
+                    "{\"ok\":false,\"message\":\"Voucher tidak ditemukan.\"}"
             );
         }
 
-        if (v.used() && !v.ip.equals(ip)) {
+        if (
+                v.used() &&
+                !v.ip.equals(ip)
+        ) {
+
             return json(
                     200,
-                    "{\"ok\":false," +
-                            "\"message\":\"Voucher ini sudah terikat ke perangkat lain.\"}"
+                    "{\"ok\":false,\"message\":\"Voucher ini sudah terikat ke perangkat lain.\"}"
             );
         }
 
@@ -316,33 +370,42 @@ public final class PortalServer {
                 Firewall.allow(ip);
 
         if (!rr.ok) {
+
             return json(
                     500,
-                    "{\"ok\":false," +
-                            "\"message\":\"Voucher valid, tetapi akses internet gagal diaktifkan.\"}"
+                    "{\"ok\":false,\"message\":\"Voucher valid, tetapi akses internet gagal diaktifkan.\"}"
             );
         }
 
-        vouchers.bind(code, ip);
+        vouchers.bind(
+                code,
+                ip
+        );
 
-        writeAuth(ip, true);
+        writeAuth(
+                ip,
+                true
+        );
 
         return json(
                 200,
-                "{\"ok\":true," +
-                        "\"ip\":\"" +
+                "{\"ok\":true,\"ip\":\"" +
                         esc(ip) +
-                        "\"," +
-                        "\"message\":\"Voucher valid. Perangkat berhasil terhubung.\"}"
+                        "\",\"message\":\"Voucher valid. Perangkat berhasil terhubung.\"}"
         );
     }
 
-    private boolean authorized(String ip) {
+    private boolean authorized(
+            String ip
+    ) {
+
         try {
-            File f = new File(
-                    dataDir,
-                    "authorized_ips.txt"
-            );
+
+            File f =
+                    new File(
+                            dataDir,
+                            "authorized_ips.txt"
+                    );
 
             if (!f.exists()) {
                 return false;
@@ -354,6 +417,7 @@ public final class PortalServer {
                     );
 
             for (String l : lines) {
+
                 if (l.trim().equals(ip)) {
                     return true;
                 }
@@ -370,10 +434,11 @@ public final class PortalServer {
             boolean add
     ) {
 
-        File f = new File(
-                dataDir,
-                "authorized_ips.txt"
-        );
+        File f =
+                new File(
+                        dataDir,
+                        "authorized_ips.txt"
+                );
 
         List<String> a =
                 new ArrayList<>();
@@ -382,12 +447,12 @@ public final class PortalServer {
 
             if (f.exists()) {
 
-                List<String> lines =
+                for (
+                        String l :
                         java.nio.file.Files.readAllLines(
                                 f.toPath()
-                        );
-
-                for (String l : lines) {
+                        )
+                ) {
 
                     l = l.trim();
 
@@ -418,10 +483,11 @@ public final class PortalServer {
 
         try {
 
-            File f = new File(
-                    dataDir,
-                    "authorized_ips.txt"
-            );
+            File f =
+                    new File(
+                            dataDir,
+                            "authorized_ips.txt"
+                    );
 
             if (f.exists()) {
 
@@ -465,11 +531,8 @@ public final class PortalServer {
         return raw(
                 200,
                 "text/html",
-                "<HTML><HEAD>" +
-                        "<TITLE>Success</TITLE>" +
-                        "</HEAD><BODY>" +
-                        "Success" +
-                        "</BODY></HTML>"
+                "<HTML><HEAD><TITLE>Success</TITLE></HEAD>" +
+                        "<BODY>Success</BODY></HTML>"
         );
     }
 
@@ -488,15 +551,16 @@ public final class PortalServer {
             byte[] buffer =
                     new byte[4096];
 
-            int count;
+            int len;
 
             while (
-                    (count = in.read(buffer)) != -1
+                    (len = in.read(buffer)) != -1
             ) {
+
                 out.write(
                         buffer,
                         0,
-                        count
+                        len
                 );
             }
 
@@ -522,31 +586,26 @@ public final class PortalServer {
             return "";
         }
 
-        for (String x : body.split("&")) {
+        for (
+                String x :
+                body.split("&")
+        ) {
 
             String[] p =
                     x.split("=", 2);
 
-            if (p.length == 2) {
+            if (
+                    p.length == 2 &&
+                    URLDecoder.decode(
+                            p[0],
+                            StandardCharsets.UTF_8
+                    ).equals(key)
+            ) {
 
-                try {
-
-                    String k =
-                            URLDecoder.decode(
-                                    p[0],
-                                    "UTF-8"
-                            );
-
-                    if (k.equals(key)) {
-
-                        return URLDecoder.decode(
-                                p[1],
-                                "UTF-8"
-                        );
-                    }
-
-                } catch (Exception ignored) {
-                }
+                return URLDecoder.decode(
+                        p[1],
+                        StandardCharsets.UTF_8
+                );
             }
         }
 
@@ -591,8 +650,6 @@ public final class PortalServer {
             status = "No Content";
         } else if (c == 400) {
             status = "Bad Request";
-        } else if (c == 500) {
-            status = "Internal Server Error";
         } else {
             status = "Error";
         }
@@ -602,30 +659,39 @@ public final class PortalServer {
                         StandardCharsets.UTF_8
                 );
 
-        return "HTTP/1.1 " +
-                c +
-                " " +
-                status +
-                "\r\n" +
-                "Content-Type: " +
-                type +
-                "\r\n" +
-                "Cache-Control: no-cache, no-store\r\n" +
-                "Connection: close\r\n" +
-                "Content-Length: " +
-                bytes.length +
-                "\r\n\r\n" +
-                b;
+        return
+                "HTTP/1.1 " +
+                        c +
+                        " " +
+                        status +
+                        "\r\n" +
+                        "Content-Type: " +
+                        type +
+                        "\r\n" +
+                        "Cache-Control: no-cache, no-store\r\n" +
+                        "Connection: close\r\n" +
+                        "Content-Length: " +
+                        bytes.length +
+                        "\r\n\r\n" +
+                        b;
     }
 
-    private static String esc(String s) {
+    private static String esc(
+            String s
+    ) {
 
         if (s == null) {
             return "";
         }
 
         return s
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"");
+                .replace(
+                        "\\",
+                        "\\\\"
+                )
+                .replace(
+                        "\"",
+                        "\\\""
+                );
     }
-}
+                }
