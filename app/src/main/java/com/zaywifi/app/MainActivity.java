@@ -8,6 +8,7 @@ import android.view.*;
 import android.widget.*;
 
 import java.io.*;
+import java.net.*;
 import java.util.*;
 
 public class MainActivity extends Activity {
@@ -20,196 +21,323 @@ public class MainActivity extends Activity {
     private TextView log;
 
     private String gw = "";
+    private String hotspotInterface = "";
 
     @Override
     public void onCreate(Bundle b) {
+
         super.onCreate(b);
 
-        setContentView(R.layout.activity_main);
+        setContentView(
+                R.layout.activity_main
+        );
 
-        vouchers = new VoucherManager(this);
-        portal = new PortalServer(this, vouchers);
+        vouchers =
+                new VoucherManager(this);
 
-        status = findViewById(R.id.status);
-        gateway = findViewById(R.id.gateway);
-        log = findViewById(R.id.log);
+        portal =
+                new PortalServer(
+                        this,
+                        vouchers
+                );
 
-        findViewById(R.id.start)
-                .setOnClickListener(v -> startService());
+        status =
+                findViewById(
+                        R.id.status
+                );
 
-        findViewById(R.id.stop)
-                .setOnClickListener(v -> stopService());
+        gateway =
+                findViewById(
+                        R.id.gateway
+                );
 
-        findViewById(R.id.create)
-                .setOnClickListener(v -> createDialog());
+        log =
+                findViewById(
+                        R.id.log
+                );
 
-        findViewById(R.id.list)
-                .setOnClickListener(v -> listDialog());
+        findViewById(
+                R.id.start
+        ).setOnClickListener(
+                v -> startService()
+        );
 
-        findViewById(R.id.clients)
-                .setOnClickListener(v -> clientsDialog());
+        findViewById(
+                R.id.stop
+        ).setOnClickListener(
+                v -> stopService()
+        );
+
+        findViewById(
+                R.id.create
+        ).setOnClickListener(
+                v -> createDialog()
+        );
+
+        findViewById(
+                R.id.list
+        ).setOnClickListener(
+                v -> listDialog()
+        );
+
+        findViewById(
+                R.id.clients
+        ).setOnClickListener(
+                v -> clientsDialog()
+        );
 
         refreshGateway();
     }
 
+    /*
+     * Coba deteksi interface hotspot.
+     *
+     * Kita tidak lagi menganggap semua IP private
+     * sebagai hotspot.
+     */
     private void refreshGateway() {
-        new Thread(() -> {
 
-            String x = detectGateway();
+        new Thread(
+                () -> {
 
-            runOnUiThread(() -> {
-                gw = x;
+                    detectHotspot();
 
-                gateway.setText(
-                        "Gateway: " +
-                        (x.isEmpty() ? "-" : x)
-                );
-            });
+                    runOnUiThread(
+                            () -> {
 
-        }).start();
+                                if (
+                                        gw.isEmpty()
+                                ) {
+
+                                    gateway.setText(
+                                            "Hotspot: belum terdeteksi"
+                                    );
+
+                                } else {
+
+                                    gateway.setText(
+                                            "Hotspot: " +
+                                                    hotspotInterface +
+                                                    "  " +
+                                                    gw
+                                    );
+                                }
+                            }
+                    );
+
+                }
+        ).start();
     }
 
-    private String detectGateway() {
+    /*
+     * Deteksi interface yang umum digunakan hotspot Android.
+     */
+    private void detectHotspot() {
 
-        Root.Result r =
-                Root.run(
-                        "ip -4 addr show 2>/dev/null"
-                );
+        gw = "";
+        hotspotInterface = "";
 
-        String[] lines =
-                r.output.split("\\n");
+        String[] interfaces = {
+                "ap0",
+                "ap1",
+                "wlan0",
+                "swlan0",
+                "softap0",
+                "rndis0"
+        };
 
-        for (String l : lines) {
+        for (String iface : interfaces) {
 
-            String t = l.trim();
+            Root.Result r =
+                    Root.run(
+                            "ip -4 addr show dev " +
+                                    iface +
+                                    " 2>/dev/null"
+                    );
 
-            if (!t.startsWith("inet ")) {
+            if (!r.ok || r.output == null) {
                 continue;
             }
 
-            String ip =
-                    t.substring(5)
-                            .split("/")[0];
+            String[] lines =
+                    r.output.split("\\n");
 
-            if (
-                    ip.startsWith("192.168.") ||
-                    ip.startsWith("10.") ||
-                    ip.startsWith("172.")
-            ) {
-                return ip;
-            }
-        }
+            for (String line : lines) {
 
-        return "";
-    }
+                String t =
+                        line.trim();
 
-    private void startService() {
-
-        new Thread(() -> {
-
-            gw = detectGateway();
-
-            if (gw.isEmpty()) {
-                ui(
-                        "Hotspot belum terdeteksi. " +
-                        "Aktifkan hotspot Android terlebih dahulu.",
-                        false
-                );
-                return;
-            }
-
-            runOnUiThread(() ->
-                    gateway.setText(
-                            "Gateway: " + gw
-                    )
-            );
-
-            /*
-             * Jalankan server lokal.
-             *
-             * Kalau gagal, sekarang kita tampilkan
-             * error asli dari PortalServer, bukan
-             * langsung menuduh port 8080 dipakai.
-             */
-            if (!portal.start()) {
-
-                String error =
-                        portal.getLastError();
-
-                if (
-                        error == null ||
-                        error.trim().isEmpty()
-                ) {
-                    error =
-                            "Penyebab tidak diketahui.";
+                if (!t.startsWith("inet ")) {
+                    continue;
                 }
 
-                ui(
-                        "Gagal menjalankan captive portal:\n" +
-                        error,
-                        false
-                );
+                String[] parts =
+                        t.split("\\s+");
 
-                return;
+                if (parts.length < 2) {
+                    continue;
+                }
+
+                String address =
+                        parts[1];
+
+                String ip =
+                        address.split("/")[0];
+
+                if (isPrivateIPv4(ip)) {
+
+                    hotspotInterface = iface;
+                    gw = ip;
+
+                    return;
+                }
             }
+        }
+    }
 
-            /*
-             * Setelah server berhasil start,
-             * pasang firewall captive portal.
-             */
-            Root.Result f =
-                    Firewall.setup(
-                            gw,
-                            portal.port()
+    private boolean isPrivateIPv4(
+            String ip
+    ) {
+
+        return
+                ip.startsWith("10.") ||
+                ip.startsWith("192.168.") ||
+                ip.startsWith("172.");
+    }
+
+    /*
+     * Start server lokal terlebih dahulu.
+     * Hotspot tidak menjadi syarat server hidup.
+     */
+    private void startService() {
+
+        new Thread(
+                () -> {
+
+                    /*
+                     * 1. Jalankan HTTP server lokal.
+                     */
+                    if (!portal.start()) {
+
+                        String error =
+                                portal.getLastError();
+
+                        ui(
+                                "Gagal menjalankan captive portal:\n" +
+                                        error,
+                                false
+                        );
+
+                        return;
+                    }
+
+                    /*
+                     * 2. Coba deteksi hotspot.
+                     */
+                    detectHotspot();
+
+                    runOnUiThread(
+                            () -> {
+
+                                if (
+                                        gw.isEmpty()
+                                ) {
+
+                                    gateway.setText(
+                                            "Hotspot: belum terdeteksi"
+                                    );
+
+                                } else {
+
+                                    gateway.setText(
+                                            "Hotspot: " +
+                                                    hotspotInterface +
+                                                    "  " +
+                                                    gw
+                                    );
+                                }
+                            }
                     );
 
-            if (!f.ok) {
+                    /*
+                     * 3. Kalau hotspot belum aktif,
+                     * server lokal tetap berjalan.
+                     */
+                    if (gw.isEmpty()) {
 
-                portal.stop();
+                        ui(
+                                "Server lokal aktif di http://127.0.0.1:" +
+                                        portal.port() +
+                                        "\nHotspot belum terdeteksi.\n" +
+                                        "Aktifkan hotspot untuk mengaktifkan captive portal.",
+                                true
+                        );
 
-                ui(
-                        "Gagal memasang firewall root:\n" +
-                        f.output,
-                        false
-                );
+                        return;
+                    }
 
-                return;
-            }
+                    /*
+                     * 4. Hotspot ditemukan.
+                     * Sekarang baru pasang firewall.
+                     */
+                    Root.Result f =
+                            Firewall.setup(
+                                    gw,
+                                    portal.port()
+                            );
 
-            writeEmptyAuth();
+                    if (!f.ok) {
 
-            ui(
-                    "Voucher mode aktif. " +
-                    "Captive portal berjalan di http://" +
-                    gw +
-                    ":" +
-                    portal.port(),
-                    true
-            );
+                        ui(
+                                "Server lokal aktif, tetapi firewall gagal:\n" +
+                                        f.output,
+                                false
+                        );
 
-        }).start();
+                        return;
+                    }
+
+                    writeEmptyAuth();
+
+                    ui(
+                            "Captive portal aktif.\n" +
+                                    "Interface: " +
+                                    hotspotInterface +
+                                    "\nGateway: " +
+                                    gw +
+                                    "\nPortal: http://" +
+                                    gw +
+                                    ":" +
+                                    portal.port(),
+                            true
+                    );
+
+                }
+        ).start();
     }
 
     private void stopService() {
 
-        new Thread(() -> {
+        new Thread(
+                () -> {
 
-            Root.Result r =
-                    Firewall.cleanup();
+                    Root.Result r =
+                            Firewall.cleanup();
 
-            portal.stop();
+                    portal.stop();
 
-            writeEmptyAuth();
+                    writeEmptyAuth();
 
-            ui(
-                    r.ok
-                            ? "Voucher mode dihentikan dan firewall dibersihkan."
-                            : "Cleanup selesai dengan catatan: " +
-                              r.output,
-                    r.ok
-            );
+                    ui(
+                            r.ok
+                                    ? "Voucher mode dihentikan dan firewall dibersihkan."
+                                    : "Cleanup selesai dengan catatan: " +
+                                    r.output,
+                            r.ok
+                    );
 
-        }).start();
+                }
+        ).start();
     }
 
     private void writeEmptyAuth() {
@@ -328,18 +456,18 @@ public class MainActivity extends Activity {
 
                                 try {
 
-                                    n = Math.max(
-                                            1,
-                                            Math.min(
-                                                    1000,
-                                                    Integer.parseInt(
-                                                            count
-                                                                    .getText()
-                                                                    .toString()
-                                                                    .trim()
+                                    n =
+                                            Math.max(
+                                                    1,
+                                                    Math.min(
+                                                            1000,
+                                                            Integer.parseInt(
+                                                                    count.getText()
+                                                                            .toString()
+                                                                            .trim()
+                                                            )
                                                     )
-                                            )
-                                    );
+                                            );
 
                                 } catch (Exception ignored) {
                                 }
@@ -355,11 +483,11 @@ public class MainActivity extends Activity {
 
                                     s.append(
                                             vouchers.createAuto()
+                                    ).append(
+                                            i + 1 < n
+                                                    ? "\n"
+                                                    : ""
                                     );
-
-                                    if (i + 1 < n) {
-                                        s.append("\n");
-                                    }
                                 }
 
                                 showText(
@@ -418,7 +546,8 @@ public class MainActivity extends Activity {
         );
 
         for (
-                VoucherManager.Voucher v : vs
+                VoucherManager.Voucher v :
+                vs
         ) {
 
             LinearLayout row =
@@ -440,12 +569,12 @@ public class MainActivity extends Activity {
 
             t.setText(
                     v.code +
-                    "\n" +
-                    (
-                            v.used()
-                                    ? "Dipakai · " + v.ip
-                                    : "Belum dipakai"
-                    )
+                            "\n" +
+                            (
+                                    v.used()
+                                            ? "Dipakai · " + v.ip
+                                            : "Belum dipakai"
+                            )
             );
 
             t.setTextColor(
@@ -466,13 +595,19 @@ public class MainActivity extends Activity {
             Button reset =
                     new Button(this);
 
-            reset.setText("Reset");
+            reset.setText(
+                    "Reset"
+            );
 
             reset.setOnClickListener(
                     x -> {
 
                         if (v.used()) {
-                            Firewall.revoke(v.ip);
+
+                            Firewall.revoke(
+                                    v.ip
+                            );
+
                             portal.writeAuth(
                                     v.ip,
                                     false
@@ -494,7 +629,9 @@ public class MainActivity extends Activity {
             Button del =
                     new Button(this);
 
-            del.setText("Hapus");
+            del.setText(
+                    "Hapus"
+            );
 
             del.setOnClickListener(
                     x -> {
@@ -515,6 +652,7 @@ public class MainActivity extends Activity {
                                         (d, w) -> {
 
                                             if (v.used()) {
+
                                                 Firewall.revoke(
                                                         v.ip
                                                 );
@@ -525,6 +663,7 @@ public class MainActivity extends Activity {
                                             );
 
                                             if (v.used()) {
+
                                                 portal.writeAuth(
                                                         v.ip,
                                                         false
@@ -612,7 +751,6 @@ public class MainActivity extends Activity {
             cut.setText(
                     "Putuskan"
             );
-
             cut.setOnClickListener(
                     v -> {
 
@@ -625,8 +763,8 @@ public class MainActivity extends Activity {
 
                         toast(
                                 "Akses " +
-                                ip +
-                                " diputuskan"
+                                        ip +
+                                        " diputuskan"
                         );
                     }
             );
@@ -668,34 +806,46 @@ public class MainActivity extends Activity {
             boolean ok
     ) {
 
-        runOnUiThread(() -> {
+        runOnUiThread(
+                () -> {
 
-            status.setText(
-                    ok
-                            ? "● Hotspot voucher aktif"
-                            : "● " +
-                              s.split("\\n")[0]
-            );
+                    String first =
+                            s == null
+                                    ? ""
+                                    : s.split(
+                                            "\\n"
+                                    )[0];
 
-            status.setTextColor(
-                    ok
-                            ? Color.rgb(
-                                    56,
-                                    217,
-                                    150
-                            )
-                            : Color.rgb(
-                                    255,
-                                    113,
-                                    129
-                            )
-            );
+                    status.setText(
+                            ok
+                                    ? "● " + first
+                                    : "● " + first
+                    );
 
-            log.setText(s);
-        });
+                    status.setTextColor(
+                            ok
+                                    ? Color.rgb(
+                                            56,
+                                            217,
+                                            150
+                                    )
+                                    : Color.rgb(
+                                            255,
+                                            113,
+                                            129
+                                    )
+                    );
+
+                    log.setText(
+                            s
+                    );
+                }
+        );
     }
 
-    private void toast(String s) {
+    private void toast(
+            String s
+    ) {
 
         runOnUiThread(
                 () ->
