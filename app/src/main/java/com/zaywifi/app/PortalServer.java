@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 
-public final class PortalServer {
+public class PortalServer {
 
     private final Context ctx;
     private final VoucherManager vouchers;
@@ -19,14 +19,15 @@ public final class PortalServer {
 
     private ServerSocket server;
     private ExecutorService pool;
-
     private final int port = 8080;
 
-    public PortalServer(Context c, VoucherManager v) {
-        ctx = c;
-        vouchers = v;
-        dataDir = new File(c.getFilesDir(), "data");
-        dataDir.mkdirs();
+    public PortalServer(Context ctx, VoucherManager vouchers) {
+        this.ctx = ctx;
+        this.vouchers = vouchers;
+        dataDir = new File(ctx.getFilesDir(), "data");
+        if (!dataDir.exists()) {
+            dataDir.mkdirs();
+        }
     }
 
     public int port() {
@@ -37,12 +38,7 @@ public final class PortalServer {
         return lastError;
     }
 
-    /*
-     * Server lokal.
-     * Tidak bergantung pada hotspot/gateway.
-     */
-    public synchronized boolean start() {
-
+    public boolean start() {
         if (running) {
             return true;
         }
@@ -50,39 +46,36 @@ public final class PortalServer {
         lastError = "";
 
         try {
-            /*
-             * Bind hanya ke loopback.
-             * Ini dipakai untuk memastikan server lokal Android
-             * bisa hidup tanpa hotspot.
-             */
             server = new ServerSocket();
             server.setReuseAddress(true);
-
             server.bind(
-                    new InetSocketAddress(
-                            InetAddress.getByName("127.0.0.1"),
-                            port
-                    ),
-                    32
+                new InetSocketAddress(
+                    InetAddress.getByName("127.0.0.1"),
+                    port
+                ),
+                32
             );
 
-            pool = Executors.newCachedThreadPool();
             running = true;
+            pool = Executors.newCachedThreadPool();
 
-            pool.submit(new Runnable() {
+            Thread acceptThread = new Thread(new Runnable() {
                 @Override
                 public void run() {
                     while (running) {
                         try {
-                            final Socket s = server.accept();
+                            final Socket socket = server.accept();
 
-                            pool.submit(new Runnable() {
-                                @Override
-                                public void run() {
-                                    handle(s);
-                                }
-                            });
-
+                            if (pool != null) {
+                                pool.execute(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        handle(socket);
+                                    }
+                                });
+                            } else {
+                                close(socket);
+                            }
                         } catch (IOException e) {
                             if (running) {
                                 lastError = e.toString();
@@ -92,606 +85,468 @@ public final class PortalServer {
                 }
             });
 
+            acceptThread.setName("ZAY-Portal-Accept");
+            acceptThread.start();
+
             return true;
 
         } catch (Exception e) {
-
             lastError = e.toString();
             running = false;
 
-            try {
-                if (server != null) {
-                    server.close();
-                }
-            } catch (Exception ignored) {
-            }
+            close(server);
+            server = null;
 
             if (pool != null) {
                 pool.shutdownNow();
+                pool = null;
             }
-
-            server = null;
-            pool = null;
 
             return false;
         }
     }
 
-    public synchronized void stop() {
-
+    public void stop() {
         running = false;
 
-        try {
-            if (server != null) {
-                server.close();
-            }
-        } catch (Exception ignored) {
-        }
+        close(server);
+        server = null;
 
         if (pool != null) {
             pool.shutdownNow();
+            pool = null;
         }
-
-        server = null;
-        pool = null;
     }
 
-    public boolean isRunning() {
-        return running;
-    }
-
-    private void handle(Socket s) {
-
+    private void handle(Socket socket) {
         try {
+            socket.setSoTimeout(10000);
 
-            s.setSoTimeout(8000);
-
-            InputStream input = s.getInputStream();
-            BufferedReader r = new BufferedReader(
-                    new InputStreamReader(
-                            input,
-                            StandardCharsets.UTF_8
-                    )
+            BufferedReader reader = new BufferedReader(
+                new InputStreamReader(
+                    socket.getInputStream(),
+                    StandardCharsets.UTF_8
+                )
             );
 
-            String first = r.readLine();
+            OutputStream out = socket.getOutputStream();
 
-            if (first == null) {
-                s.close();
+            String requestLine = reader.readLine();
+
+            if (requestLine == null || requestLine.isEmpty()) {
+                close(socket);
                 return;
             }
 
-            String[] f = first.split(" ");
+            String[] first = requestLine.split(" ");
 
-            String method =
-                    f.length > 0 ? f[0] : "GET";
+            if (first.length < 2) {
+                close(socket);
+                return;
+            }
 
-            String target =
-                    f.length > 1 ? f[1] : "/";
+            String method = first[0];
+            String target = first[1];
 
-            int len = 0;
+            int contentLength = 0;
 
             String line;
 
-            while ((line = r.readLine()) != null && !line.isEmpty()) {
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty()) {
+                    break;
+                }
 
-                String lower = line.toLowerCase(Locale.US);
+                int p = line.indexOf(':');
 
-                if (lower.startsWith("content-length:")) {
+                if (p > 0) {
+                    String key = line.substring(0, p).trim();
 
-                    try {
-                        len = Integer.parseInt(
-                                line.substring(15).trim()
-                        );
-                    } catch (Exception ignored) {
-                        len = 0;
+                    String value = line.substring(p + 1).trim();
+
+                    if ("Content-Length".equalsIgnoreCase(key)) {
+                        try {
+                            contentLength = Integer.parseInt(value);
+                        } catch (Exception ignored) {
+                        }
                     }
                 }
             }
 
             String body = "";
 
-            if (len > 0) {
+            if (contentLength > 0 && contentLength < 1024 * 1024) {
+                char[] buffer = new char[contentLength];
 
-                char[] b = new char[len];
+                int read = 0;
 
-                int total = 0;
-
-                while (total < len) {
-
-                    int n = r.read(
-                            b,
-                            total,
-                            len - total
+                while (read < contentLength) {
+                    int n = reader.read(
+                        buffer,
+                        read,
+                        contentLength - read
                     );
 
                     if (n < 0) {
                         break;
                     }
 
-                    total += n;
+                    read += n;
                 }
 
-                if (total > 0) {
-                    body = new String(
-                            b,
-                            0,
-                            total
-                    );
-                }
+                body = new String(buffer, 0, read);
             }
 
-            String path;
-
-            try {
-                path = URLDecoder.decode(
-                        target.split("\\?", 2)[0],
-                        "UTF-8"
-                );
-            } catch (Exception e) {
-                path = "/";
-            }
-
-            String ip =
-                    s.getInetAddress().getHostAddress();
-
-            String out =
-                    route(
-                            method,
-                            path,
-                            body,
-                            ip
-                    );
-
-            byte[] bytes =
-                    out.getBytes(StandardCharsets.UTF_8);
-
-            OutputStream o =
-                    s.getOutputStream();
-
-            o.write(bytes);
-            o.flush();
-
-            s.close();
-
-        } catch (Exception ignored) {
-
-            try {
-                s.close();
-            } catch (Exception ignored2) {
-            }
-        }
-    }
-
-    private String route(
-            String method,
-            String path,
-            String body,
-            String ip
-    ) {
-
-        if (path.equals("/status")) {
-
-            return json(
-                    200,
-                    "{\"authorized\":" +
-                            authorized(ip) +
-                            "}"
-            );
-        }
-
-        if (
-                path.equals("/authorize") &&
-                method.equalsIgnoreCase("POST")
-        ) {
-
-            String v = form(
-                    body,
-                    "voucher"
-            );
-
-            return authorize(v, ip);
-        }
-
-        if (path.startsWith("/probe/")) {
-
-            String p = path.substring(7);
-
-            if (authorized(ip)) {
-                return response(p);
-            }
-
-            return html(
-                    200,
-                    load("index.html")
-            );
-        }
-
-        if (path.equals("/success.html")) {
-
-            return html(
-                    200,
-                    load("success.html")
-            );
-        }
-
-        return html(
-                200,
-                load("index.html")
-        );
-    }
-
-    private String authorize(
-            String code,
-            String ip
-    ) {
-
-        code =
-                code == null
-                        ? ""
-                        : code.trim()
-                                .toUpperCase(Locale.US);
-
-        if (
-                !code.matches(
-                        "[A-Z0-9][A-Z0-9-]{2,31}"
-                )
-        ) {
-
-            return json(
-                    400,
-                    "{\"ok\":false,\"message\":\"Format voucher tidak valid.\"}"
-            );
-        }
-
-        VoucherManager.Voucher v =
-                vouchers.find(code);
-
-        if (v == null) {
-
-            return json(
-                    200,
-                    "{\"ok\":false,\"message\":\"Voucher tidak ditemukan.\"}"
-            );
-        }
-
-        if (
-                v.used() &&
-                !v.ip.equals(ip)
-        ) {
-
-            return json(
-                    200,
-                    "{\"ok\":false,\"message\":\"Voucher ini sudah terikat ke perangkat lain.\"}"
-            );
-        }
-
-        Root.Result rr =
-                Firewall.allow(ip);
-
-        if (!rr.ok) {
-
-            return json(
-                    500,
-                    "{\"ok\":false,\"message\":\"Voucher valid, tetapi akses internet gagal diaktifkan.\"}"
-            );
-        }
-
-        vouchers.bind(
-                code,
-                ip
-        );
-
-        writeAuth(
-                ip,
-                true
-        );
-
-        return json(
-                200,
-                "{\"ok\":true,\"ip\":\"" +
-                        esc(ip) +
-                        "\",\"message\":\"Voucher valid. Perangkat berhasil terhubung.\"}"
-        );
-    }
-
-    private boolean authorized(
-            String ip
-    ) {
-
-        try {
-
-            File f =
-                    new File(
-                            dataDir,
-                            "authorized_ips.txt"
-                    );
-
-            if (!f.exists()) {
-                return false;
-            }
-
-            List<String> lines =
-                    java.nio.file.Files.readAllLines(
-                            f.toPath()
-                    );
-
-            for (String l : lines) {
-
-                if (l.trim().equals(ip)) {
-                    return true;
-                }
-            }
-
-        } catch (Exception ignored) {
-        }
-
-        return false;
-    }
-
-    public void writeAuth(
-            String ip,
-            boolean add
-    ) {
-
-        File f =
-                new File(
-                        dataDir,
-                        "authorized_ips.txt"
-                );
-
-        List<String> a =
-                new ArrayList<>();
-
-        try {
-
-            if (f.exists()) {
-
-                for (
-                        String l :
-                        java.nio.file.Files.readAllLines(
-                                f.toPath()
-                        )
-                ) {
-
-                    l = l.trim();
-
-                    if (
-                            !l.isEmpty() &&
-                            !l.equals(ip)
-                    ) {
-                        a.add(l);
-                    }
-                }
-            }
-
-            if (add) {
-                a.add(ip);
-            }
-
-            java.nio.file.Files.write(
-                    f.toPath(),
-                    a,
-                    StandardCharsets.UTF_8
-            );
-
-        } catch (Exception ignored) {
-        }
-    }
-
-    public List<String> clients() {
-
-        try {
-
-            File f =
-                    new File(
-                            dataDir,
-                            "authorized_ips.txt"
-                    );
-
-            if (f.exists()) {
-
-                return java.nio.file.Files.readAllLines(
-                        f.toPath()
-                );
-            }
-
-        } catch (Exception ignored) {
-        }
-
-        return new ArrayList<>();
-    }
-
-    private String response(String p) {
-
-        if (p.equals("generate_204")) {
-            return raw(
-                    204,
-                    "text/plain",
-                    ""
-            );
-        }
-
-        if (p.equals("connecttest.txt")) {
-            return raw(
-                    200,
-                    "text/plain",
-                    "Microsoft Connect Test"
-            );
-        }
-
-        if (p.equals("ncsi.txt")) {
-            return raw(
-                    200,
-                    "text/plain",
-                    "Microsoft NCSI."
-            );
-        }
-
-        return raw(
-                200,
-                "text/html",
-                "<HTML><HEAD><TITLE>Success</TITLE></HEAD>" +
-                        "<BODY>Success</BODY></HTML>"
-        );
-    }
-
-    private String load(String n) {
-
-        try {
-
-            InputStream in =
-                    ctx.getAssets().open(
-                            "portal/" + n
-                    );
-
-            ByteArrayOutputStream out =
-                    new ByteArrayOutputStream();
-
-            byte[] buffer =
-                    new byte[4096];
-
-            int len;
-
-            while (
-                    (len = in.read(buffer)) != -1
-            ) {
-
-                out.write(
-                        buffer,
-                        0,
-                        len
-                );
-            }
-
-            in.close();
-
-            return new String(
-                    out.toByteArray(),
-                    StandardCharsets.UTF_8
+            route(
+                method,
+                target,
+                body,
+                socket.getInetAddress().getHostAddress(),
+                out
             );
 
         } catch (Exception e) {
-
-            return "<h1>ZAY WiFi</h1>";
+            try {
+                send(
+                    socket.getOutputStream(),
+                    500,
+                    "text/plain; charset=utf-8",
+                    "Internal Server Error"
+                );
+            } catch (Exception ignored) {
+            }
+        } finally {
+            close(socket);
         }
     }
 
-    private static String form(
-            String body,
-            String key
-    ) {
+    private void route(
+        String method,
+        String target,
+        String body,
+        String ip,
+        OutputStream out
+    ) throws IOException {
 
+        String path = target;
+
+        int query = path.indexOf('?');
+
+        if (query >= 0) {
+            path = path.substring(0, query);
+        }
+
+        if ("/status".equals(path)) {
+            send(
+                out,
+                200,
+                "application/json; charset=utf-8",
+                "{\"running\":true}"
+            );
+            return;
+        }
+
+        if ("/authorize".equals(path) &&
+            "POST".equalsIgnoreCase(method)) {
+
+            String code = getParam(body, "code");
+
+            if (code == null || code.isEmpty()) {
+                send(
+                    out,
+                    400,
+                    "text/plain; charset=utf-8",
+                    "Kode voucher kosong"
+                );
+                return;
+            }
+
+            VoucherManager.Voucher voucher =
+                vouchers.find(code);
+
+            if (voucher == null) {
+                send(
+                    out,
+                    403,
+                    "text/plain; charset=utf-8",
+                    "Voucher tidak valid"
+                );
+                return;
+            }
+
+            Root.Result result = Firewall.allow(ip);
+
+            if (result == null || !result.ok) {
+                send(
+                    out,
+                    500,
+                    "text/plain; charset=utf-8",
+                    "Gagal memberikan akses"
+                );
+                return;
+            }
+
+            vouchers.bind(code, ip);
+
+            appendAuthorized(ip);
+
+            send(
+                out,
+                200,
+                "text/html; charset=utf-8",
+                successPage()
+            );
+
+            return;
+        }
+
+        if (path.startsWith("/probe/")) {
+            send(
+                out,
+                204,
+                "text/plain; charset=utf-8",
+                ""
+            );
+            return;
+        }
+
+        if ("/success.html".equals(path)) {
+            send(
+                out,
+                200,
+                "text/html; charset=utf-8",
+                successPage()
+            );
+            return;
+        }
+
+        send(
+            out,
+            200,
+            "text/html; charset=utf-8",
+            indexPage()
+        );
+    }
+
+    private String getParam(String body, String name) {
         if (body == null) {
             return "";
         }
 
-        for (
-                String x :
-                body.split("&")
-        ) {
+        String[] parts = body.split("&");
 
-            String[] p =
-                    x.split("=", 2);
+        for (String part : parts) {
+            String[] p = part.split("=", 2);
 
-            if (
-                    p.length == 2 &&
-                    URLDecoder.decode(
-                            p[0],
-                            StandardCharsets.UTF_8
-                    ).equals(key)
-            ) {
+            if (p.length != 2) {
+                continue;
+            }
 
-                return URLDecoder.decode(
-                        p[1],
-                        StandardCharsets.UTF_8
-                );
+            if (name.equals(p[0])) {
+                return urlDecode(p[1]);
             }
         }
 
         return "";
     }
 
-    private static String json(
-            int c,
-            String b
-    ) {
-
-        return raw(
-                c,
-                "application/json; charset=utf-8",
-                b
-        );
+    private String urlDecode(String value) {
+        try {
+            return URLDecoder.decode(
+                value,
+                "UTF-8"
+            );
+        } catch (Exception e) {
+            return value;
+        }
     }
 
-    private static String html(
-            int c,
-            String b
-    ) {
-
-        return raw(
-                c,
-                "text/html; charset=utf-8",
-                b
+    private void appendAuthorized(String ip) {
+        File file = new File(
+            dataDir,
+            "authorized_ips.txt"
         );
+
+        try {
+            FileWriter writer = new FileWriter(
+                file,
+                true
+            );
+
+            writer.write(ip);
+            writer.write("\n");
+            writer.close();
+
+        } catch (IOException ignored) {
+        }
     }
 
-    private static String raw(
-            int c,
-            String type,
-            String b
-    ) {
+    private boolean authorized(String ip) {
+        File file = new File(
+            dataDir,
+            "authorized_ips.txt"
+        );
 
-        String status;
-
-        if (c == 200) {
-            status = "OK";
-        } else if (c == 204) {
-            status = "No Content";
-        } else if (c == 400) {
-            status = "Bad Request";
-        } else {
-            status = "Error";
+        if (!file.exists()) {
+            return false;
         }
 
-        byte[] bytes =
-                b.getBytes(
-                        StandardCharsets.UTF_8
+        try {
+            BufferedReader reader =
+                new BufferedReader(
+                    new FileReader(file)
                 );
 
-        return
-                "HTTP/1.1 " +
-                        c +
-                        " " +
-                        status +
-                        "\r\n" +
-                        "Content-Type: " +
-                        type +
-                        "\r\n" +
-                        "Cache-Control: no-cache, no-store\r\n" +
-                        "Connection: close\r\n" +
-                        "Content-Length: " +
-                        bytes.length +
-                        "\r\n\r\n" +
-                        b;
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                if (ip.equals(line.trim())) {
+                    reader.close();
+                    return true;
+                }
+            }
+
+            reader.close();
+
+        } catch (IOException ignored) {
+        }
+
+        return false;
     }
 
-    private static String esc(
-            String s
-    ) {
+    private String load(String name) {
+        File file = new File(dataDir, name);
 
-        if (s == null) {
+        if (!file.exists()) {
             return "";
         }
 
-        return s
-                .replace(
-                        "\\",
-                        "\\\\"
-                )
-                .replace(
-                        "\"",
-                        "\\\""
-                );
+        ByteArrayOutputStream buffer =
+            new ByteArrayOutputStream();
+
+        try {
+            FileInputStream input =
+                new FileInputStream(file);
+
+            byte[] data = new byte[4096];
+
+            int n;
+
+            while ((n = input.read(data)) != -1) {
+                buffer.write(data, 0, n);
+            }
+
+            input.close();
+
+            return new String(
+                buffer.toByteArray(),
+                StandardCharsets.UTF_8
+            );
+
+        } catch (IOException e) {
+            return "";
+        }
     }
-                }
+
+    private String indexPage() {
+        return "<!doctype html>" +
+            "<html><head>" +
+            "<meta charset=\"utf-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<title>ZAY WiFi</title>" +
+            "<style>" +
+            "body{font-family:sans-serif;background:#111;color:#fff;padding:30px}" +
+            "input,button{width:100%;padding:14px;margin-top:10px;box-sizing:border-box}" +
+            "button{background:#1683ff;color:#fff;border:0;border-radius:8px}" +
+            "</style></head><body>" +
+            "<h1>ZAY WiFi</h1>" +
+            "<p>Silakan masukkan kode voucher</p>" +
+            "<form method=\"post\" action=\"/authorize\">" +
+            "<input name=\"code\" placeholder=\"Kode Voucher\" autocomplete=\"off\">" +
+            "<button type=\"submit\">Login</button>" +
+            "</form>" +
+            "</body></html>";
+    }
+
+    private String successPage() {
+        return "<!doctype html>" +
+            "<html><head>" +
+            "<meta charset=\"utf-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<title>ZAY WiFi</title>" +
+            "<style>" +
+            "body{font-family:sans-serif;background:#111;color:#fff;text-align:center;padding:50px}" +
+            "a{display:block;background:#1683ff;color:#fff;padding:14px;border-radius:8px;text-decoration:none;margin-top:20px}" +
+            "</style></head><body>" +
+            "<h1>Voucher Valid!</h1>" +
+            "<p>Selamat, akses internet Anda sudah aktif.</p>" +
+            "<a href=\"/success.html\">Lanjutkan</a>" +
+            "</body></html>";
+    }
+
+    private void send(
+        OutputStream out,
+        int status,
+        String type,
+        String body
+    ) throws IOException {
+
+        byte[] data = body.getBytes(
+            StandardCharsets.UTF_8
+        );
+
+        String response =
+            "HTTP/1.1 " +
+            statusText(status) +
+            "\r\n" +
+            "Content-Type: " +
+            type +
+            "\r\n" +
+            "Content-Length: " +
+            data.length +
+            "\r\n" +
+            "Connection: close\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "\r\n";
+
+        out.write(
+            response.getBytes(
+                StandardCharsets.UTF_8
+            )
+        );
+
+        out.write(data);
+        out.flush();
+    }
+
+    private String statusText(int status) {
+        if (status == 200) return "200 OK";
+        if (status == 204) return "204 No Content";
+        if (status == 400) return "400 Bad Request";
+        if (status == 403) return "403 Forbidden";
+        if (status == 500) return "500 Internal Server Error";
+        return status + " Error";
+    }
+
+    private void close(Closeable c) {
+        if (c == null) {
+            return;
+        }
+
+        try {
+            c.close();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void close(ServerSocket s) {
+        if (s == null) {
+            return;
+        }
+
+        try {
+            s.close();
+        } catch (Exception ignored) {
+        }
+    }
+}
